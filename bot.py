@@ -1,7 +1,6 @@
 import os
 import threading
 import sqlite3
-from datetime import datetime, timezone, timedelta
 from flask import Flask, request
 import requests
 import telebot
@@ -15,7 +14,6 @@ CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 PRICE_USDT = 3  # цена рекламы
-MSK = timezone(timedelta(hours=3))
 
 # ============================
 # БАЗА ДАННЫХ
@@ -30,8 +28,7 @@ CREATE TABLE IF NOT EXISTS ads (
     photo_file_id TEXT,
     invoice_id INTEGER,
     paid INTEGER DEFAULT 0,
-    posted INTEGER DEFAULT 0,
-    post_date TEXT
+    posted INTEGER DEFAULT 0
 )
 """)
 db.commit()
@@ -122,15 +119,14 @@ def callback(call):
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
             return
-        sql.execute("SELECT id, user_id, text, paid, post_date FROM ads ORDER BY id DESC")
+        sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
         ads = sql.fetchall()
         if not ads:
             bot.send_message(call.message.chat.id, "Нет заявок.")
-        for ad_id, user_id, text, paid, post_date in ads:
+        for ad_id, user_id, text, paid in ads:
             status = "✅ Оплачено" if paid else "❌ Не оплачено"
             bot.send_message(call.message.chat.id,
-                             f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n"
-                             f"💳 Статус: {status}\n📅 Дата: {post_date}")
+                             f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n💳 Статус: {status}")
 
 # ============================
 # ПОЛУЧЕНИЕ ТЕКСТА
@@ -158,12 +154,11 @@ def create_ad_invoice(message):
     ad = user_ads.pop(user_id)
     text = ad["text"]
     photo = ad["photo"]
-    post_date = datetime.now(MSK).strftime("%Y-%m-%d")  # сохраняем текущую дату
 
     pay_url, invoice_id = create_invoice(PRICE_USDT, "Оплата рекламы")
 
-    sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id, post_date) VALUES (?, ?, ?, ?, ?)",
-                (user_id, text, photo, invoice_id, post_date))
+    sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id) VALUES (?, ?, ?, ?)",
+                (user_id, text, photo, invoice_id))
     db.commit()
 
     kb = InlineKeyboardMarkup()
