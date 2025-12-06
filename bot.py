@@ -6,17 +6,14 @@ import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ============================
-# НАСТРОЙКИ
-# ============================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-PRICE_USDT = 3  # цена рекламы
+PRICE_USDT = 3
 
 # ============================
-# БАЗА ДАННЫХ
+# База данных
 # ============================
 db = sqlite3.connect("ads.db", check_same_thread=False)
 sql = db.cursor()
@@ -34,57 +31,52 @@ CREATE TABLE IF NOT EXISTS ads (
 db.commit()
 
 # ============================
-# ИНВОЙСЫ
+# Инвойсы
 # ============================
 def create_invoice(amount, description):
-    url = "https://pay.crypt.bot/api/createInvoice"
-    payload = {"amount": amount, "currency_type": "crypto", "asset": "USDT", "description": description}
-    headers = {"Crypto-Pay-API-Token": CRYPTOBOT_API}
-    r = requests.post(url, headers=headers, json=payload).json()
+    r = requests.post(
+        "https://pay.crypt.bot/api/createInvoice",
+        headers={"Crypto-Pay-API-Token": CRYPTOBOT_API},
+        json={"amount": amount, "currency_type": "crypto", "asset": "USDT", "description": description}
+    ).json()
     return r["result"]["pay_url"], r["result"]["invoice_id"]
 
 def check_invoice_status(invoice_id):
-    url = f"https://pay.crypt.bot/api/getInvoices?invoice_ids={invoice_id}"
-    headers = {"Crypto-Pay-API-Token": CRYPTOBOT_API}
-    r = requests.get(url, headers=headers).json()
+    r = requests.get(
+        f"https://pay.crypt.bot/api/getInvoices?invoice_ids={invoice_id}",
+        headers={"Crypto-Pay-API-Token": CRYPTOBOT_API}
+    ).json()
     return r["result"]["items"][0]["status"] == "paid"
 
 # ============================
-# ФОНОВАЯ ПРОВЕРКА ОПЛАТ
+# Фоновая проверка оплаты
 # ============================
 def payment_checker():
     import time
     while True:
-        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id FROM ads WHERE paid = 0")
-        for ad_id, user_id, text, photo_file_id, invoice_id in sql.fetchall():
+        sql.execute("SELECT id, user_id, text, invoice_id FROM ads WHERE paid=0")
+        for ad_id, user_id, text, invoice_id in sql.fetchall():
             if check_invoice_status(invoice_id):
-                sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
+                sql.execute("UPDATE ads SET paid=1 WHERE id=?", (ad_id,))
                 db.commit()
                 bot.send_message(user_id, "✅ Оплата получена! Ваша реклама будет опубликована.")
                 bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n{text}")
         time.sleep(15)
 
-# ============================
-# ИНИЦИАЛИЗАЦИЯ БОТА
-# ============================
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
 user_ads = {}
 
-# ============================
-# ФЛАСК ДЛЯ WEBHOOK
-# ============================
 app = Flask(_name_)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
+    update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
     bot.process_new_updates([update])
     return "OK", 200
 
 # ============================
-# КОМАНДА /START
+# /start
 # ============================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -97,7 +89,7 @@ def start(message):
     bot.send_message(message.chat.id, "👋 Привет! Выбери действие:", reply_markup=kb)
 
 # ============================
-# ОБРАБОТКА КНОПОК
+# Кнопки
 # ============================
 @bot.callback_query_handler(func=lambda c: True)
 def callback(call):
@@ -120,16 +112,13 @@ def callback(call):
             bot.answer_callback_query(call.id, "❌ Нет доступа")
             return
         sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
-        ads = sql.fetchall()
-        if not ads:
-            bot.send_message(call.message.chat.id, "Нет заявок.")
-        for ad_id, user_id, text, paid in ads:
+        for ad_id, user_id, text, paid in sql.fetchall():
             status = "✅ Оплачено" if paid else "❌ Не оплачено"
             bot.send_message(call.message.chat.id,
                              f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n💳 Статус: {status}")
 
 # ============================
-# ПОЛУЧЕНИЕ ТЕКСТА
+# Получение текста
 # ============================
 def get_ad_content(message):
     user_ads[message.from_user.id] = {"text": message.text, "photo": None}
@@ -147,7 +136,7 @@ def skip_photo(message):
         create_ad_invoice(message)
 
 # ============================
-# СОЗДАНИЕ ИНВОЙСА
+# Создание инвойса
 # ============================
 def create_ad_invoice(message):
     user_id = message.from_user.id
@@ -156,22 +145,17 @@ def create_ad_invoice(message):
     photo = ad["photo"]
 
     pay_url, invoice_id = create_invoice(PRICE_USDT, "Оплата рекламы")
-
     sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id) VALUES (?, ?, ?, ?)",
                 (user_id, text, photo, invoice_id))
     db.commit()
 
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("💳 Оплатить USDT", url=pay_url))
-
-    bot.send_message(user_id,
-        f"💵 Стоимость: {PRICE_USDT} USDT\nНажмите кнопку для оплаты:",
-        reply_markup=kb
-    )
+    bot.send_message(user_id, f"💵 Стоимость: {PRICE_USDT} USDT\nНажмите кнопку для оплаты:", reply_markup=kb)
     bot.send_message(ADMIN_ID, f"🆕 Новая заявка!\nПользователь: {user_id}\n{text}")
 
 # ============================
-# ЗАПУСК ФЛАСК
+# Запуск Flask
 # ============================
 if _name_ == "_main_":
     bot.remove_webhook()
