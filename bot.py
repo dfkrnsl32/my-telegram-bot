@@ -2,7 +2,7 @@ import os
 import time
 import threading
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import requests
 import telebot
@@ -60,8 +60,8 @@ def check_invoice_status(invoice_id):
 # ============================
 def payment_checker():
     while True:
-        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id, post_date FROM ads WHERE paid = 0")
-        for ad_id, user_id, text, photo_file_id, invoice_id, post_date in sql.fetchall():
+        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id FROM ads WHERE paid = 0")
+        for ad_id, user_id, text, photo_file_id, invoice_id in sql.fetchall():
             if check_invoice_status(invoice_id):
                 sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
                 db.commit()
@@ -75,6 +75,9 @@ def payment_checker():
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
 
+# ============================
+# СТАРТОВОЕ МЕНЮ
+# ============================
 @bot.message_handler(commands=['start'])
 def start(message):
     kb = InlineKeyboardMarkup()
