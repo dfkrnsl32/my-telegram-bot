@@ -1,21 +1,21 @@
 import os
 import threading
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request
 import requests
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ============================
 # НАСТРОЙКИ
 # ============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # токен от BotFather
-CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")  # токен CryptoBot
-CHANNEL_ID = os.getenv("CHANNEL_ID")  # например @мой_канал
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # твой Telegram ID
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 PRICE_USDT = 3  # цена рекламы
-MSK = timezone(timedelta(hours=3))  # московское время
+MSK = timezone(timedelta(hours=3))
 
 # ============================
 # БАЗА ДАННЫХ
@@ -63,8 +63,8 @@ def payment_checker():
             if check_invoice_status(invoice_id):
                 sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
                 db.commit()
-                bot.send_message(user_id, f"✅ Оплата получена!\nВаше объявление будет опубликовано.\n📅 Дата: {post_date}")
-                bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n📅 {post_date}\n{text}")
+                bot.send_message(user_id, f"✅ Оплата получена!\nВаша реклама будет опубликована.")
+                bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n{text}")
         time.sleep(15)
 
 # ============================
@@ -122,58 +122,20 @@ def callback(call):
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
             return
-        sql.execute("SELECT id, user_id, text, paid, post_date FROM ads ORDER BY id DESC")
+        sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
         ads = sql.fetchall()
         if not ads:
             bot.send_message(call.message.chat.id, "Нет заявок.")
-            return
-        for ad_id, user_id, text, paid, post_date in ads:
+        for ad_id, user_id, text, paid in ads:
             status = "✅ Оплачено" if paid else "❌ Не оплачено"
-            bot.send_message(call.message.chat.id,
-                f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📅 Дата: {post_date}\n📝 Текст: {text}\n💳 Статус: {status}")
+            bot.send_message(call.message.chat.id, f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n💳 Статус: {status}")
 
 # ============================
 # ПОЛУЧЕНИЕ ТЕКСТА
 # ============================
 def get_ad_content(message):
-    user_ads[message.from_user.id] = {"text": message.text, "photo": None, "date": None}
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    today = datetime.now(MSK).strftime("%Y-%m-%d")
-    tomorrow = (datetime.now(MSK) + timedelta(days=1)).strftime("%Y-%m-%d")
-    day_after = (datetime.now(MSK) + timedelta(days=2)).strftime("%Y-%m-%d")
-    kb.add(KeyboardButton("Сегодня"))
-    kb.add(KeyboardButton("Завтра"))
-    kb.add(KeyboardButton("Через 2 дня"))
-    kb.add(KeyboardButton("Ввести вручную"))
-    msg = bot.send_message(message.chat.id,
-                           "📅 Выберите дату публикации:", reply_markup=kb)
-    bot.register_next_step_handler(msg, get_post_date)
-
-def get_post_date(message):
-    user_id = message.from_user.id
-    choice = message.text.lower()
-    now = datetime.now(MSK)
-    if choice == "сегодня":
-        user_ads[user_id]["date"] = now.strftime("%Y-%m-%d")
-    elif choice == "завтра":
-        user_ads[user_id]["date"] = (now + timedelta(days=1)).strftime("%Y-%m-%d")
-    elif choice == "через 2 дня":
-        user_ads[user_id]["date"] = (now + timedelta(days=2)).strftime("%Y-%m-%d")
-    else:
-        bot.send_message(message.chat.id, "✍ Введите дату вручную в формате ГГГГ-ММ-ДД")
-        bot.register_next_step_handler(message, manual_date)
-        return
-    bot.send_message(message.chat.id, "📸 Теперь отправьте фото или напишите 'Пропустить'")
-    
-def manual_date(message):
-    user_id = message.from_user.id
-    try:
-        dt = datetime.strptime(message.text, "%Y-%m-%d")
-        user_ads[user_id]["date"] = dt.strftime("%Y-%m-%d")
-        bot.send_message(message.chat.id, "📸 Теперь отправьте фото или напишите 'Пропустить'")
-    except:
-        bot.send_message(message.chat.id, "❌ Некорректный формат даты. Введите в формате ГГГГ-ММ-ДД")
-        bot.register_next_step_handler(message, manual_date)
+    user_ads[message.from_user.id] = {"text": message.text, "photo": None}
+    bot.send_message(message.chat.id, "📸 Можно отправить фото или написать 'Пропустить'.")
 
 @bot.message_handler(content_types=['photo'])
 def get_photo(message):
@@ -194,7 +156,7 @@ def create_ad_invoice(message):
     ad = user_ads.pop(user_id)
     text = ad["text"]
     photo = ad["photo"]
-    post_date = ad["date"] if ad["date"] else datetime.now(MSK).strftime("%Y-%m-%d")
+    post_date = datetime.now(MSK).strftime("%Y-%m-%d")  # сохраняем текущую дату
 
     pay_url, invoice_id = create_invoice(PRICE_USDT, "Оплата рекламы")
 
@@ -206,10 +168,10 @@ def create_ad_invoice(message):
     kb.add(InlineKeyboardButton("💳 Оплатить USDT", url=pay_url))
 
     bot.send_message(user_id,
-        f"💵 Стоимость: {PRICE_USDT} USDT\n📅 Дата подачи: {post_date}\nНажмите кнопку для оплаты:",
+        f"💵 Стоимость: {PRICE_USDT} USDT\nНажмите кнопку для оплаты:",
         reply_markup=kb
     )
-    bot.send_message(ADMIN_ID, f"🆕 Новая заявка!\nПользователь: {user_id}\n📅 {post_date}\n{text}")
+    bot.send_message(ADMIN_ID, f"🆕 Новая заявка!\nПользователь: {user_id}\n{text}")
 
 # ============================
 # ЗАПУСК ФЛАСК
