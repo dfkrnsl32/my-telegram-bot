@@ -3,7 +3,6 @@ import threading
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request
-
 import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -11,12 +10,11 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ============================
 # НАСТРОЙКИ
 # ============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+TOKEN = os.getenv("TELEGRAM_TOKEN")  # твой токен от BotFather
+CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")  # токен CryptoBot
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # например @мой_канал
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # твой Telegram ID
 PRICE_USDT = 3  # цена рекламы
-
 MSK = timezone(timedelta(hours=3))  # московское время
 
 # ============================
@@ -58,6 +56,7 @@ def check_invoice_status(invoice_id):
 # ФОНОВАЯ ПРОВЕРКА ОПЛАТ
 # ============================
 def payment_checker():
+    import time
     while True:
         sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id, post_date FROM ads WHERE paid = 0")
         for ad_id, user_id, text, photo_file_id, invoice_id, post_date in sql.fetchall():
@@ -66,7 +65,6 @@ def payment_checker():
                 db.commit()
                 bot.send_message(user_id, f"✅ Оплата получена!\nВаше объявление принято.\n📅 Дата: {post_date}")
                 bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n📅 {post_date}\n{text}")
-        import time
         time.sleep(15)
 
 # ============================
@@ -74,7 +72,6 @@ def payment_checker():
 # ============================
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
-
 user_ads = {}
 
 # ============================
@@ -107,17 +104,13 @@ def start(message):
 # ============================
 @bot.callback_query_handler(func=lambda c: True)
 def callback(call):
-    # ПРАЙС
     if call.data == "price":
         bot.send_message(call.message.chat.id, f"💵 Стоимость рекламы: {PRICE_USDT} USDT")
-    # О БОТЕ
     elif call.data == "about":
         bot.send_message(call.message.chat.id, "ℹ️ Бот для заказа рекламы через CryptoBot.")
-    # ЗАКАЗ РЕКЛАМЫ
     elif call.data == "order":
         bot.send_message(call.message.chat.id, "✍ Отправьте текст объявления:")
         bot.register_next_step_handler(call.message, get_ad_content)
-    # АДМИН-ПАНЕЛЬ
     elif call.data == "admin_panel":
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
@@ -125,7 +118,6 @@ def callback(call):
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("📄 Просмотр заявок", callback_data="view_ads"))
         bot.send_message(call.message.chat.id, "👑 Админ-панель:", reply_markup=kb)
-    # ПРОСМОТР ЗАЯВОК
     elif call.data == "view_ads":
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
@@ -187,7 +179,6 @@ def create_ad_invoice(message):
 # ЗАПУСК ФЛАСК
 # ============================
 if _name_ == "_main_":
-    # Установи webhook на Render: https://<your-app>.onrender.com/<TOKEN>
     bot.remove_webhook()
-    bot.set_webhook(url=f"https://<YOUR_RENDER_DOMAIN>/{TOKEN}")
+    bot.set_webhook(url=f"https://my-telegram-bot-ujca.onrender.com/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
