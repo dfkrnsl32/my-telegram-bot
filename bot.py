@@ -170,7 +170,7 @@ def create_ad_invoice(message):
 # ============================
 # Запуск Flask
 # ============================
-if _name_ == "_main_":
+if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=f"https://{RENDER_DOMAIN}/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
