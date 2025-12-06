@@ -11,10 +11,10 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ============================
 # НАСТРОЙКИ — ВСТАВЬ СВОИ
 # ============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")          # Токен бота
-CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")   # Токен CryptoBot
-CHANNEL_ID = os.getenv("CHANNEL_ID")         # Ваш канал, например '@мой_канал'
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))     # Ваш Telegram ID
+TOKEN = os.getenv("TELEGRAM_TOKEN")  # Токен бота
+CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")  # Токен CryptoBot
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # Ваш канал, например '@мой_канал'
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # Ваш Telegram ID
 PRICE_USDT = float(os.getenv("PRICE_USDT", 5))  # Цена рекламы
 
 # ============================
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS ads (
 db.commit()
 
 # ============================
-# ФУНКЦИИ ОПЛАТЫ
+# СОЗДАНИЕ ИНВОЙСА
 # ============================
 def create_invoice(amount, description):
     url = "https://pay.crypt.bot/api/createInvoice"
@@ -60,8 +60,8 @@ def check_invoice_status(invoice_id):
 # ============================
 def payment_checker():
     while True:
-        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id FROM ads WHERE paid = 0")
-        for ad_id, user_id, text, photo_file_id, invoice_id in sql.fetchall():
+        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id, post_date FROM ads WHERE paid = 0")
+        for ad_id, user_id, text, photo_file_id, invoice_id, post_date in sql.fetchall():
             if check_invoice_status(invoice_id):
                 sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
                 db.commit()
@@ -75,11 +75,6 @@ def payment_checker():
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
 
-user_ads = {}
-
-# ============================
-# СТАРТ И МЕНЮ
-# ============================
 @bot.message_handler(commands=['start'])
 def start(message):
     kb = InlineKeyboardMarkup()
@@ -93,20 +88,40 @@ def start(message):
 # ============================
 # ОБРАБОТКА КНОПОК
 # ============================
+user_ads = {}
+
 @bot.callback_query_handler(func=lambda c: True)
 def callback(call):
+    # ============================
+    # ПРАЙС
+    # ============================
     if call.data == "price":
         bot.send_message(call.message.chat.id, f"💵 Стоимость рекламы: {PRICE_USDT} USDT")
+    # ============================
+    # О БОТЕ
+    # ============================
     elif call.data == "about":
         bot.send_message(call.message.chat.id, "ℹ️ Бот для заказа рекламы в Telegram канале. Оплата через USDT CryptoBot.")
+    # ============================
+    # ЗАКАЗ РЕКЛАМЫ
+    # ============================
     elif call.data == "order":
         bot.send_message(call.message.chat.id, "✍ Отправьте текст рекламы:")
         bot.register_next_step_handler(call.message, get_ad_content)
-    elif call.data == "admin_panel" and call.from_user.id == ADMIN_ID:
+    # ============================
+    # АДМИН-ПАНЕЛЬ
+    # ============================
+    elif call.data == "admin_panel":
+        if call.from_user.id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа")
+            return
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("📄 Просмотр заявок", callback_data="view_ads"))
         bot.send_message(call.message.chat.id, "👑 Админ-панель:", reply_markup=kb)
-    elif call.data == "view_ads" and call.from_user.id == ADMIN_ID:
+    elif call.data == "view_ads":
+        if call.from_user.id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа")
+            return
         sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
         ads = sql.fetchall()
         if not ads:
@@ -118,7 +133,7 @@ def callback(call):
                 bot.send_message(call.message.chat.id, f"Заявка #{ad_id}\nПользователь: {user_id}\nТекст: {text}\nСтатус: {status}")
 
 # ============================
-# ОБРАБОТКА ЗАЯВОК
+# ПОЛУЧЕНИЕ ТЕКСТА РЕКЛАМЫ
 # ============================
 def get_ad_content(message):
     user_ads[message.from_user.id] = {"text": message.text, "photo": None}
@@ -135,6 +150,9 @@ def skip_photo(message):
     if message.from_user.id in user_ads:
         create_ad_invoice(message)
 
+# ============================
+# СОЗДАНИЕ ИНВОЙСА И СОХРАНЕНИЕ ЗАЯВКИ
+# ============================
 def create_ad_invoice(message):
     user_id = message.from_user.id
     ad = user_ads.pop(user_id)
