@@ -5,12 +5,12 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, request
 import requests
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # ============================
 # НАСТРОЙКИ
 # ============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # твой токен от BotFather
+TOKEN = os.getenv("TELEGRAM_TOKEN")  # токен от BotFather
 CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")  # токен CryptoBot
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # например @мой_канал
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # твой Telegram ID
@@ -63,7 +63,7 @@ def payment_checker():
             if check_invoice_status(invoice_id):
                 sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
                 db.commit()
-                bot.send_message(user_id, f"✅ Оплата получена!\nВаше объявление принято.\n📅 Дата: {post_date}")
+                bot.send_message(user_id, f"✅ Оплата получена!\nВаше объявление будет опубликовано.\n📅 Дата: {post_date}")
                 bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n📅 {post_date}\n{text}")
         time.sleep(15)
 
@@ -136,8 +136,44 @@ def callback(call):
 # ПОЛУЧЕНИЕ ТЕКСТА
 # ============================
 def get_ad_content(message):
-    user_ads[message.from_user.id] = {"text": message.text, "photo": None}
-    bot.send_message(message.chat.id, "📸 Отправьте фото или напишите 'Пропустить'")
+    user_ads[message.from_user.id] = {"text": message.text, "photo": None, "date": None}
+    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    today = datetime.now(MSK).strftime("%Y-%m-%d")
+    tomorrow = (datetime.now(MSK) + timedelta(days=1)).strftime("%Y-%m-%d")
+    day_after = (datetime.now(MSK) + timedelta(days=2)).strftime("%Y-%m-%d")
+    kb.add(KeyboardButton("Сегодня"))
+    kb.add(KeyboardButton("Завтра"))
+    kb.add(KeyboardButton("Через 2 дня"))
+    kb.add(KeyboardButton("Ввести вручную"))
+    msg = bot.send_message(message.chat.id,
+                           "📅 Выберите дату публикации:", reply_markup=kb)
+    bot.register_next_step_handler(msg, get_post_date)
+
+def get_post_date(message):
+    user_id = message.from_user.id
+    choice = message.text.lower()
+    now = datetime.now(MSK)
+    if choice == "сегодня":
+        user_ads[user_id]["date"] = now.strftime("%Y-%m-%d")
+    elif choice == "завтра":
+        user_ads[user_id]["date"] = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+    elif choice == "через 2 дня":
+        user_ads[user_id]["date"] = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+    else:
+        bot.send_message(message.chat.id, "✍ Введите дату вручную в формате ГГГГ-ММ-ДД")
+        bot.register_next_step_handler(message, manual_date)
+        return
+    bot.send_message(message.chat.id, "📸 Теперь отправьте фото или напишите 'Пропустить'")
+    
+def manual_date(message):
+    user_id = message.from_user.id
+    try:
+        dt = datetime.strptime(message.text, "%Y-%m-%d")
+        user_ads[user_id]["date"] = dt.strftime("%Y-%m-%d")
+        bot.send_message(message.chat.id, "📸 Теперь отправьте фото или напишите 'Пропустить'")
+    except:
+        bot.send_message(message.chat.id, "❌ Некорректный формат даты. Введите в формате ГГГГ-ММ-ДД")
+        bot.register_next_step_handler(message, manual_date)
 
 @bot.message_handler(content_types=['photo'])
 def get_photo(message):
@@ -158,9 +194,9 @@ def create_ad_invoice(message):
     ad = user_ads.pop(user_id)
     text = ad["text"]
     photo = ad["photo"]
+    post_date = ad["date"] if ad["date"] else datetime.now(MSK).strftime("%Y-%m-%d")
 
     pay_url, invoice_id = create_invoice(PRICE_USDT, "Оплата рекламы")
-    post_date = datetime.now(MSK).strftime("%Y-%m-%d %H:%M:%S")
 
     sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id, post_date) VALUES (?, ?, ?, ?, ?)",
                 (user_id, text, photo, invoice_id, post_date))
