@@ -78,7 +78,7 @@ user_ads = {}
 # ============================
 # Flask для webhook
 # ============================
-app = Flask(_name)  # двойное подчеркивание __name_
+app = Flask(__name__)  # двойное подчеркивание __name__
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
