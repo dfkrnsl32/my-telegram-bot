@@ -11,10 +11,10 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ============================
 # НАСТРОЙКИ — ВСТАВЬ СВОИ
 # ============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")  # Токен бота
-CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")  # Токен CryptoBot
-CHANNEL_ID = os.getenv("CHANNEL_ID")  # Ваш канал, например '@мой_канал'
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # Ваш Telegram ID
+TOKEN = os.getenv("TELEGRAM_TOKEN")          # Токен бота
+CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")   # Токен CryptoBot
+CHANNEL_ID = os.getenv("CHANNEL_ID")         # Ваш канал, например '@мой_канал'
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))     # Ваш Telegram ID
 PRICE_USDT = float(os.getenv("PRICE_USDT", 5))  # Цена рекламы
 
 # ============================
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS ads (
 db.commit()
 
 # ============================
-# СОЗДАНИЕ ИНВОЙСА
+# ФУНКЦИИ ОПЛАТЫ
 # ============================
 def create_invoice(amount, description):
     url = "https://pay.crypt.bot/api/createInvoice"
@@ -75,8 +75,10 @@ def payment_checker():
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
 
+user_ads = {}
+
 # ============================
-# СТАРТОВОЕ МЕНЮ
+# СТАРТ И МЕНЮ
 # ============================
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -91,8 +93,6 @@ def start(message):
 # ============================
 # ОБРАБОТКА КНОПОК
 # ============================
-user_ads = {}
-
 @bot.callback_query_handler(func=lambda c: True)
 def callback(call):
     if call.data == "price":
@@ -102,7 +102,24 @@ def callback(call):
     elif call.data == "order":
         bot.send_message(call.message.chat.id, "✍ Отправьте текст рекламы:")
         bot.register_next_step_handler(call.message, get_ad_content)
+    elif call.data == "admin_panel" and call.from_user.id == ADMIN_ID:
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("📄 Просмотр заявок", callback_data="view_ads"))
+        bot.send_message(call.message.chat.id, "👑 Админ-панель:", reply_markup=kb)
+    elif call.data == "view_ads" and call.from_user.id == ADMIN_ID:
+        sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
+        ads = sql.fetchall()
+        if not ads:
+            bot.send_message(call.message.chat.id, "Нет заявок.")
+        else:
+            for ad in ads:
+                ad_id, user_id, text, paid = ad
+                status = "✅ Оплачено" if paid else "❌ Не оплачено"
+                bot.send_message(call.message.chat.id, f"Заявка #{ad_id}\nПользователь: {user_id}\nТекст: {text}\nСтатус: {status}")
 
+# ============================
+# ОБРАБОТКА ЗАЯВОК
+# ============================
 def get_ad_content(message):
     user_ads[message.from_user.id] = {"text": message.text, "photo": None}
     bot.send_message(message.chat.id, "📸 Можно отправить фото или написать 'Пропустить'.")
