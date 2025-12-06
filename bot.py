@@ -1,19 +1,20 @@
 import os
 import threading
 import sqlite3
-from flask import Flask, request
 import requests
+from flask import Flask, request
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ============================
 # Настройки
 # ============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-PRICE_USDT = 3  # цена рекламы
+TOKEN = os.getenv("TELEGRAM_TOKEN")          # Telegram токен из Environment Variables
+CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")  # CryptoBot API токен из Environment Variables
+CHANNEL_ID = os.getenv("CHANNEL_ID")        # ID канала из Environment Variables
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))    # Telegram ID админа
+PRICE_USDT = 3                               # цена рекламы
+RENDER_DOMAIN = "my-telegram-bot-ujca.onrender.com"  # твой Render-домен
 
 # ============================
 # База данных
@@ -28,13 +29,14 @@ CREATE TABLE IF NOT EXISTS ads (
     photo_file_id TEXT,
     invoice_id INTEGER,
     paid INTEGER DEFAULT 0,
-    posted INTEGER DEFAULT 0
+    posted INTEGER DEFAULT 0,
+    created_at TEXT
 )
 """)
 db.commit()
 
 # ============================
-# Инвойсы CryptoBot
+# CryptoBot API
 # ============================
 def create_invoice(amount, description):
     r = requests.post(
@@ -52,7 +54,7 @@ def check_invoice_status(invoice_id):
     return r["result"]["items"][0]["status"] == "paid"
 
 # ============================
-# Фоновая проверка оплаты
+# Проверка оплаты в фоне
 # ============================
 def payment_checker():
     import time
@@ -74,9 +76,9 @@ threading.Thread(target=payment_checker, daemon=True).start()
 user_ads = {}
 
 # ============================
-# Flask для Webhook
+# Flask для webhook
 # ============================
-app = Flask(_name_)
+app = Flask(_name)  # двойное подчеркивание __name_
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -120,14 +122,14 @@ def callback(call):
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
             return
-        sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
-        for ad_id, user_id, text, paid in sql.fetchall():
+        sql.execute("SELECT id, user_id, text, paid, created_at FROM ads ORDER BY id DESC")
+        for ad_id, user_id, text, paid, created_at in sql.fetchall():
             status = "✅ Оплачено" if paid else "❌ Не оплачено"
             bot.send_message(call.message.chat.id,
-                             f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n💳 Статус: {status}")
+                             f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n💳 Статус: {status}\n🕒 Дата: {created_at}")
 
 # ============================
-# Получение текста
+# Получение текста объявления
 # ============================
 def get_ad_content(message):
     user_ads[message.from_user.id] = {"text": message.text, "photo": None}
@@ -148,25 +150,27 @@ def skip_photo(message):
 # Создание инвойса
 # ============================
 def create_ad_invoice(message):
+    from datetime import datetime
     user_id = message.from_user.id
     ad = user_ads.pop(user_id)
     text = ad["text"]
     photo = ad["photo"]
+    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     pay_url, invoice_id = create_invoice(PRICE_USDT, "Оплата рекламы")
-    sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id) VALUES (?, ?, ?, ?)",
-                (user_id, text, photo, invoice_id))
+    sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, text, photo, invoice_id, created_at))
     db.commit()
 
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("💳 Оплатить USDT", url=pay_url))
     bot.send_message(user_id, f"💵 Стоимость: {PRICE_USDT} USDT\nНажмите кнопку для оплаты:", reply_markup=kb)
-    bot.send_message(ADMIN_ID, f"🆕 Новая заявка!\nПользователь: {user_id}\n{text}")
+    bot.send_message(ADMIN_ID, f"🆕 Новая заявка!\nПользователь: {user_id}\n{text}\n🕒 {created_at}")
 
 # ============================
 # Запуск Flask
 # ============================
 if _name_ == "_main_":
     bot.remove_webhook()
-    bot.set_webhook(url=f"https://my-telegram-bot-ujca.onrender.com/{TOKEN}")
+    bot.set_webhook(url=f"https://{RENDER_DOMAIN}/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
