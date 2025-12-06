@@ -6,11 +6,14 @@ import requests
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# ============================
+# Настройки
+# ============================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-PRICE_USDT = 3
+PRICE_USDT = 3  # цена рекламы
 
 # ============================
 # База данных
@@ -31,7 +34,7 @@ CREATE TABLE IF NOT EXISTS ads (
 db.commit()
 
 # ============================
-# Инвойсы
+# Инвойсы CryptoBot
 # ============================
 def create_invoice(amount, description):
     r = requests.post(
@@ -63,10 +66,16 @@ def payment_checker():
                 bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n{text}")
         time.sleep(15)
 
+# ============================
+# Инициализация бота
+# ============================
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
 user_ads = {}
 
+# ============================
+# Flask для Webhook
+# ============================
 app = Flask(_name_)
 
 @app.route(f"/{TOKEN}", methods=["POST"])
@@ -76,7 +85,7 @@ def webhook():
     return "OK", 200
 
 # ============================
-# /start
+# Команда /start
 # ============================
 @bot.message_handler(commands=['start'])
 def start(message):
