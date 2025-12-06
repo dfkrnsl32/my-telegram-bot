@@ -58,12 +58,12 @@ def check_invoice_status(invoice_id):
 def payment_checker():
     import time
     while True:
-        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id, post_date FROM ads WHERE paid = 0")
-        for ad_id, user_id, text, photo_file_id, invoice_id, post_date in sql.fetchall():
+        sql.execute("SELECT id, user_id, text, photo_file_id, invoice_id FROM ads WHERE paid = 0")
+        for ad_id, user_id, text, photo_file_id, invoice_id in sql.fetchall():
             if check_invoice_status(invoice_id):
                 sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
                 db.commit()
-                bot.send_message(user_id, f"✅ Оплата получена!\nВаша реклама будет опубликована.")
+                bot.send_message(user_id, "✅ Оплата получена! Ваша реклама будет опубликована.")
                 bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n{text}")
         time.sleep(15)
 
@@ -122,13 +122,15 @@ def callback(call):
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
             return
-        sql.execute("SELECT id, user_id, text, paid FROM ads ORDER BY id DESC")
+        sql.execute("SELECT id, user_id, text, paid, post_date FROM ads ORDER BY id DESC")
         ads = sql.fetchall()
         if not ads:
             bot.send_message(call.message.chat.id, "Нет заявок.")
-        for ad_id, user_id, text, paid in ads:
+        for ad_id, user_id, text, paid, post_date in ads:
             status = "✅ Оплачено" if paid else "❌ Не оплачено"
-            bot.send_message(call.message.chat.id, f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n💳 Статус: {status}")
+            bot.send_message(call.message.chat.id,
+                             f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📝 Текст: {text}\n"
+                             f"💳 Статус: {status}\n📅 Дата: {post_date}")
 
 # ============================
 # ПОЛУЧЕНИЕ ТЕКСТА
