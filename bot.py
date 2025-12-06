@@ -1,8 +1,8 @@
 import os
-import time
 import threading
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from flask import Flask, request
 
 import requests
 import telebot
@@ -15,12 +15,9 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 CRYPTOBOT_API = os.getenv("CRYPTOBOT_API")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+PRICE_USDT = 3  # цена рекламы
 
-# 💵 УСТАНОВЛЕНА ЦЕНА 3 USDT
-PRICE_USDT = 3
-
-# Московский часовой пояс (корректно работает на Render)
-MSK = timezone(timedelta(hours=3))
+MSK = timezone(timedelta(hours=3))  # московское время
 
 # ============================
 # БАЗА ДАННЫХ
@@ -42,7 +39,7 @@ CREATE TABLE IF NOT EXISTS ads (
 db.commit()
 
 # ============================
-# СОЗДАНИЕ ИНВОЙСА
+# ИНВОЙСЫ
 # ============================
 def create_invoice(amount, description):
     url = "https://pay.crypt.bot/api/createInvoice"
@@ -67,10 +64,9 @@ def payment_checker():
             if check_invoice_status(invoice_id):
                 sql.execute("UPDATE ads SET paid = 1 WHERE id = ?", (ad_id,))
                 db.commit()
-
                 bot.send_message(user_id, f"✅ Оплата получена!\nВаше объявление принято.\n📅 Дата: {post_date}")
                 bot.send_message(ADMIN_ID, f"💰 Оплачено!\nЗаявка #{ad_id}\n📅 {post_date}\n{text}")
-
+        import time
         time.sleep(15)
 
 # ============================
@@ -79,6 +75,23 @@ def payment_checker():
 bot = telebot.TeleBot(TOKEN)
 threading.Thread(target=payment_checker, daemon=True).start()
 
+user_ads = {}
+
+# ============================
+# ФЛАСК ДЛЯ WEBHOOK
+# ============================
+app = Flask(_name_)
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
+
+# ============================
+# КОМАНДА /START
+# ============================
 @bot.message_handler(commands=['start'])
 def start(message):
     kb = InlineKeyboardMarkup()
@@ -89,23 +102,21 @@ def start(message):
         kb.add(InlineKeyboardButton("👑 Админ-панель", callback_data="admin_panel"))
     bot.send_message(message.chat.id, "👋 Привет! Выбери действие:", reply_markup=kb)
 
-user_ads = {}
-
+# ============================
+# ОБРАБОТКА КНОПОК
+# ============================
 @bot.callback_query_handler(func=lambda c: True)
 def callback(call):
     # ПРАЙС
     if call.data == "price":
         bot.send_message(call.message.chat.id, f"💵 Стоимость рекламы: {PRICE_USDT} USDT")
-
     # О БОТЕ
     elif call.data == "about":
         bot.send_message(call.message.chat.id, "ℹ️ Бот для заказа рекламы через CryptoBot.")
-
-    # ЗАКАЗ
+    # ЗАКАЗ РЕКЛАМЫ
     elif call.data == "order":
         bot.send_message(call.message.chat.id, "✍ Отправьте текст объявления:")
         bot.register_next_step_handler(call.message, get_ad_content)
-
     # АДМИН-ПАНЕЛЬ
     elif call.data == "admin_panel":
         if call.from_user.id != ADMIN_ID:
@@ -114,30 +125,20 @@ def callback(call):
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("📄 Просмотр заявок", callback_data="view_ads"))
         bot.send_message(call.message.chat.id, "👑 Админ-панель:", reply_markup=kb)
-
     # ПРОСМОТР ЗАЯВОК
     elif call.data == "view_ads":
         if call.from_user.id != ADMIN_ID:
             bot.answer_callback_query(call.id, "❌ Нет доступа")
             return
-
         sql.execute("SELECT id, user_id, text, paid, post_date FROM ads ORDER BY id DESC")
         ads = sql.fetchall()
-
         if not ads:
             bot.send_message(call.message.chat.id, "Нет заявок.")
             return
-
         for ad_id, user_id, text, paid, post_date in ads:
             status = "✅ Оплачено" if paid else "❌ Не оплачено"
-            bot.send_message(
-                call.message.chat.id,
-                f"📌 Заявка #{ad_id}\n"
-                f"👤 Пользователь: {user_id}\n"
-                f"📅 Дата: {post_date}\n"
-                f"📝 Текст: {text}\n"
-                f"💳 Статус: {status}"
-            )
+            bot.send_message(call.message.chat.id,
+                f"📌 Заявка #{ad_id}\n👤 Пользователь: {user_id}\n📅 Дата: {post_date}\n📝 Текст: {text}\n💳 Статус: {status}")
 
 # ============================
 # ПОЛУЧЕНИЕ ТЕКСТА
@@ -167,7 +168,6 @@ def create_ad_invoice(message):
     photo = ad["photo"]
 
     pay_url, invoice_id = create_invoice(PRICE_USDT, "Оплата рекламы")
-
     post_date = datetime.now(MSK).strftime("%Y-%m-%d %H:%M:%S")
 
     sql.execute("INSERT INTO ads (user_id, text, photo_file_id, invoice_id, post_date) VALUES (?, ?, ?, ?, ?)",
@@ -178,15 +178,16 @@ def create_ad_invoice(message):
     kb.add(InlineKeyboardButton("💳 Оплатить USDT", url=pay_url))
 
     bot.send_message(user_id,
-        f"💵 Стоимость: {PRICE_USDT} USDT\n"
-        f"📅 Дата подачи: {post_date}\n"
-        f"Нажмите кнопку для оплаты:",
+        f"💵 Стоимость: {PRICE_USDT} USDT\n📅 Дата подачи: {post_date}\nНажмите кнопку для оплаты:",
         reply_markup=kb
     )
-
     bot.send_message(ADMIN_ID, f"🆕 Новая заявка!\nПользователь: {user_id}\n📅 {post_date}\n{text}")
 
 # ============================
-# ЗАПУСК 24/7
+# ЗАПУСК ФЛАСК
 # ============================
-bot.infinity_polling()
+if _name_ == "_main_":
+    # Установи webhook на Render: https://<your-app>.onrender.com/<TOKEN>
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://<YOUR_RENDER_DOMAIN>/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
